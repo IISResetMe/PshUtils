@@ -7,12 +7,12 @@ namespace IISResetMe.PshUtils
 {
     public class CryptoKnife
     {
-        public class RSAKeyPair 
+        public class RSAKeyPair
         {
             public readonly string PrivateKey;
             public readonly string PublicKey;
 
-            public RSAKeyPair(string privateKey, string publicKey) 
+            public RSAKeyPair(string privateKey, string publicKey)
             {
                 this.PrivateKey = privateKey;
                 this.PublicKey = publicKey;
@@ -23,19 +23,21 @@ namespace IISResetMe.PshUtils
         {
             // TODO: moar tag numbers!!!
 
-            Reserved    = 0x00,
-            Boolean     = 0x01,
-            Integer     = 0x02,
-            BitString   = 0x03,
+            Reserved = 0x00,
+            Boolean = 0x01,
+            Integer = 0x02,
+            BitString = 0x03,
             OctetString = 0x04,
-            NullString  = 0x05,
-            OID         = 0x06,
+            NullString = 0x05,
+            OID = 0x06,
 
-            UTF8String  = 0x0C,
+            UTF8String = 0x0C,
             OIDRelative = 0x0D,
 
-            Sequence    = 0x30
+            Sequence = 0x30
         }
+
+        public static readonly byte[] RSAObjectIdentifier = new byte[] { 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01 };
 
         private static RSACryptoServiceProvider GenerateRSAPair(int keySize = 2048)
         {
@@ -44,15 +46,21 @@ namespace IISResetMe.PshUtils
 
         public static RSAKeyPair NewRSAKey(int keySize)
         {
-            return EncodeKeyPair(GenerateRSAPair(keySize));
+            using (RSACryptoServiceProvider myCSP = GenerateRSAPair(keySize))
+            {
+                RSAKeyPair myKeyPair = EncodeKeyPair(myCSP);
+                myCSP.PersistKeyInCsp = false;
+            
+                return myKeyPair;
+            }
         }
 
-        private static RSAKeyPair EncodeKeyPair(RSACryptoServiceProvider csp) 
+        private static RSAKeyPair EncodeKeyPair(RSACryptoServiceProvider csp)
         {
             RSAParameters RSAParams = csp.ExportParameters(false);
-            
+
             StringBuilder privateKeyBuilder = new StringBuilder();
-            using (StringWriter privateKeyWriter = new StringWriter(privateKeyBuilder)) 
+            using (StringWriter privateKeyWriter = new StringWriter(privateKeyBuilder))
             {
                 ExportPrivateKey(csp, privateKeyWriter);
             }
@@ -111,7 +119,7 @@ namespace IISResetMe.PshUtils
                 outputStream.WriteLine(pemHeader);
 
                 for (var i = 0; i < base64.Length; i += 64)
-                {                    
+                {
                     outputStream.WriteLine(base64, i, Math.Min(64, base64.Length - i));
                 }
 
@@ -142,14 +150,8 @@ namespace IISResetMe.PshUtils
                     EncodeTag(innerWriter, ASNTypeTag.Sequence);
                     EncodeLength(innerWriter, 13);
 
-                    // TODO: abstract away OIDs
-                    var rsaEncryptionOid = new byte[] { 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01 };
-                    
-                    EncodeTag(innerWriter, ASNTypeTag.OID);
-                    EncodeLength(innerWriter, rsaEncryptionOid.Length);
-                    EncodeOid(innerWriter, rsaEncryptionOid);
-                    EncodeTag(innerWriter, ASNTypeTag.NullString);
-                    EncodeLength(innerWriter, 0);
+                    EncodeOid(innerWriter, RSAObjectIdentifier);
+                    EncodeNullString(innerWriter);
 
                     EncodeTag(innerWriter, ASNTypeTag.BitString);
                     using (var bitStringStream = new MemoryStream())
@@ -197,7 +199,15 @@ namespace IISResetMe.PshUtils
 
         private static void EncodeOid(BinaryWriter stream, byte[] oid)
         {
+            EncodeTag(stream, ASNTypeTag.OID);
+            EncodeLength(stream, oid.Length);
             stream.Write(oid);
+        }
+
+        private static void EncodeNullString(BinaryWriter stream)
+        {
+            EncodeTag(stream, ASNTypeTag.NullString);
+            EncodeLength(stream, 0);
         }
 
         private static void EncodeLength(BinaryWriter stream, int length)
@@ -205,36 +215,38 @@ namespace IISResetMe.PshUtils
             if (length < 0)
                 throw new ArgumentOutOfRangeException("length", "Length must be non-negative");
 
-            if(length < 0x80) 
+            if (length < 0x80)
             {
                 stream.Write((byte)length);
             }
-            else 
+            else
             {
                 var temp = length;
                 var bytesRequired = 0;
-                while (temp > 0) {
+                while (temp > 0)
+                {
                     temp >>= 8;
                     bytesRequired++;
                 }
 
                 stream.Write((byte)(bytesRequired | 0x80));
 
-                for (var i = bytesRequired - 1; i >= 0; i--) {
+                for (var i = bytesRequired - 1; i >= 0; i--)
+                {
                     stream.Write((byte)(length >> (8 * i) & 0xFF));
                 }
             }
         }
 
-        private static void EncodeIntegerBigEndian(BinaryWriter stream, byte[] value, bool forceUnsigned = true) 
+        private static void EncodeIntegerBigEndian(BinaryWriter stream, byte[] value, bool forceUnsigned = true)
         {
             stream.Write((byte)0x02);
 
             var prefixZeros = 0;
 
-            for (var i = 0; i < value.Length; i++) 
+            for (var i = 0; i < value.Length; i++)
             {
-                if (value[i] != 0) 
+                if (value[i] != 0)
                     break;
 
                 prefixZeros++;
@@ -245,7 +257,7 @@ namespace IISResetMe.PshUtils
                 EncodeLength(stream, 1);
                 stream.Write((byte)0x00);
             }
-            else 
+            else
             {
                 if (forceUnsigned && value[prefixZeros] > 0x7F)
                 {
